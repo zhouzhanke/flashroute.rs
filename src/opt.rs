@@ -100,11 +100,14 @@ pub fn parse_targets(arg: &str) -> Result<Targets> {
 
 pub fn get_opt() -> Opt {
     let mut opt: Opt = Opt::from_args();
+    // 获得网络
     opt.local_addr = crate::utils::get_interface_ipv4_addr(&opt.interface).unwrap();
+    // 检查发包率
     if opt.probing_rate == 0 {
         log::warn!("Probing rate is 0, rate limit will be turned off.");
         opt.probing_rate = u64::MAX;
     }
+    // 检查是否开启绘图优化
     if opt.plot_optimized {
         opt.redundancy_removal = false;
     }

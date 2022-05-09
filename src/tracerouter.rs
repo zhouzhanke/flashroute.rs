@@ -152,13 +152,18 @@ impl Tracerouter {
 
 impl Tracerouter {
     pub async fn run(&self) -> Result<TopoGraph> {
+        // 记录初始时间
         let start_time = SystemTime::now();
 
+        // 启动预探测
         let _ = self.run_preprobing_task().await?;
+        // 启动主探测
         let topo = self.run_probing_task().await?;
 
+        // 记录结束时间
         let end_time = SystemTime::now();
 
+        // 输出结果
         log::info!(
             "[Summary] Pre: sent {:?}, recv {:?};  Main: sent {:?}, recv {:?}",
             self.sent_preprobes,
@@ -191,18 +196,25 @@ impl Tracerouter {
 
 impl Tracerouter {
     async fn run_preprobing_task(&self) -> Result<()> {
+        // 生成预探测探针
         let prober = Prober::new(ProbePhase::Pre);
+        // 开启<数据包分析模块>的消息队列
         let (recv_tx, mut recv_rx) = mpsc::unbounded_channel();
+        // 开启网络
         let mut nm = NetworkManager::new(prober, recv_tx)?;
+        // 开启<数据包分析模块>的停止信号消息队列
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
+        // 异步接收探针
         let targets = self.targets.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    // 接收
                     Some(result) = recv_rx.recv() => {
                         Self::preprobing_callback(&targets, result);
                     }
+                    // 停止
                     _ = &mut stop_rx => {
                         return;
                     }
@@ -211,25 +223,36 @@ impl Tracerouter {
         });
 
         // WORKER BEGIN
+        // 进度条
         let mut pb = pbr::ProgressBar::new(self.targets.len() as u64);
+        // 进度条刷新率
         pb.set_max_refresh_rate(Some(Duration::from_millis(100)));
+        //
         for target in self.targets.values() {
+            // 进度条递增
             pb.inc();
+            // 停止
             if self.stopped() {
                 break;
             }
+            // 发送探针
             nm.schedule_probe((target.addr, OPT.preprobing_ttl)).await;
         }
+        // 进度条完成
         pb.finish();
         // WORKER END
 
+        // 等待3秒时间
         if !self.stopped() {
             log::info!("[Pre] Waiting for 3 secs...");
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
+        // 停止网络
         nm.stop();
+        // 给接收进程发送停止信号
         let _ = stop_tx.send(());
 
+        // 预发送计数
         let preprobed_count = {
             let mut c = 0u64;
             for _ in self
@@ -241,8 +264,10 @@ impl Tracerouter {
             }
             c
         };
+        // 输出结果
         log::info!("Preprobed: {}", preprobed_count);
 
+        // 记录数据,预探测阶段的发送和接收
         self.sent_preprobes.fetch_add(nm.sent_packets(), SeqCst);
         self.recv_responses_pre.fetch_add(nm.recv_packets(), SeqCst);
 
@@ -250,11 +275,14 @@ impl Tracerouter {
     }
 
     fn preprobing_callback(targets: &DcbMap, result: ProbeResult) {
+        // 检查回应地址是否是探测地址
         if !result.from_destination {
             return;
         }
+        // 输出结果
         log::trace!("[Pre] CALLBACK: {}", result.destination);
 
+        // 决定分割跳数
         let key = Self::addr_to_key(result.destination);
         if let Some(dcb) = targets.get(&key) {
             dcb.update_split_ttl(result.distance, true);
@@ -277,26 +305,40 @@ impl Tracerouter {
 impl Tracerouter {
     async fn run_probing_task(&self) -> Result<TopoGraph> {
         let prober = Prober::new(ProbePhase::Main);
+        // <数据分析>的消息队列
         let (recv_tx, mut recv_rx) = mpsc::unbounded_channel();
+        // 开启网络
         let mut nm = NetworkManager::new(prober, recv_tx)?;
+        // <数据分析>和<绘图信息>的停止信号消息队列
         let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
 
         let targets = self.targets.clone();
+        // 正向探测储存单元
         let mut backward_stop_set = HashSet::<Ipv4Addr>::with_capacity(1_100_000);
+        // 反向探测储存单元
         let mut forward_discovery_set = HashSet::<Ipv4Addr>::with_capacity(200_000);
 
+        // <绘图信息>的消息队列
         let (topo_tx, topo_rx) = mpsc::unbounded_channel();
         let cb_topo_tx = topo_tx.clone();
 
+        // 开启绘图模块
+        // <绘图信息>消息队列接收方
         let topo_task = tokio::spawn(async move { Topo::new(topo_rx).run() });
 
+        // 数据分析模块
+        // <数据分析>消息队列接收方
+        // <绘图信息>消息队列发送方
         let callback_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(result) = recv_rx.recv() => {
+                        // 数据分析
                         Self::probing_callback(&targets, &mut backward_stop_set, &mut forward_discovery_set, &result);
+                        // <绘图信息>消息队列发送方
                         let _ = cb_topo_tx.send(TopoReq::Result(result));
                     }
+                    // 停止信号
                     _ = &mut stop_rx => {
                         let _ = cb_topo_tx.send(TopoReq::Stop);
                         break;
@@ -329,14 +371,17 @@ impl Tracerouter {
                 let dcb = self.targets.get(&key).unwrap();
 
                 let mut ok = true;
+                // 反向探测
                 if let Some(t) = dcb.pull_backward_task() {
                     nm.schedule_probe((dcb.addr, t)).await;
                     ok = false;
                 }
+                // 正向探测
                 if let Some(t) = dcb.pull_forward_task() {
                     nm.schedule_probe((dcb.addr, t)).await;
                     ok = false;
                 }
+                // 如果失败则保存信息然后重新发送
                 if !ok {
                     new_keys.push(key);
                 }

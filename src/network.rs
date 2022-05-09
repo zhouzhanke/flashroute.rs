@@ -44,6 +44,7 @@ pub struct NetworkManager {
 
 impl NetworkManager {
     pub fn new(prober: Prober, recv_tx: MpscTx<ProbeResult>) -> Result<Self> {
+        // 开启<监听探针发送>的消息队列
         let (send_tx, send_rx) = mpsc::channel(OPT.probing_rate.min(400_000).max(1_000) as usize);
 
         let prober = Arc::new(prober);
@@ -51,8 +52,13 @@ impl NetworkManager {
         let recv_packets = Arc::new(AtomicU64::new(0));
         let mut stop_txs = Vec::new();
 
+        // 开启<监听探针发送>的停止信号消息队列
         let (stop_tx, stop_rx) = oneshot::channel::<()>();
+        // <监听探针发送>停止信号消息队列的发送方集合
         stop_txs.push(stop_tx);
+        // 开启发送进程
+        // send_rx<监听探针发送>接收方
+        // stop_rx<监听探针发送>停止信号接收方
         Self::start_sending_task(prober.clone(), send_rx, stop_rx, sent_packets.clone())?;
 
         let stopped = Arc::new(AtomicBool::new(false));
@@ -66,8 +72,10 @@ impl NetworkManager {
         Ok(Self {
             sent_packets,
             recv_packets,
+            // <监听探针发送>消息队列的发送方
             send_tx,
             stopped,
+            // <监听探针发送>停止信号消息队列的发送方集合
             stop_txs,
         })
     }
@@ -78,10 +86,14 @@ impl NetworkManager {
         mut stop_rx: OneshotRx<()>,
         sent_packets: Arc<AtomicU64>,
     ) -> Result<()> {
+        // 使用UDP数据包
         let protocol = Layer3(Udp);
+        // 开启网络
         let (mut sender, _) = transport_channel(0, protocol)?;
+        // IPv4
         let local_ip = OPT.local_addr;
 
+        // 开启<网络发送模块>的消息队列
         let (net_send_tx, mut net_send_rx) = mpsc::channel::<Ipv4Packet>(10000);
 
         tokio::spawn(async move {
@@ -89,6 +101,7 @@ impl NetworkManager {
                 if let Some(packet) = net_send_rx.recv().await {
                     if !OPT.dry_run {
                         let dst = packet.get_destination();
+                        // 发送
                         let _ = sender.send_to(packet, IpAddr::V4(dst));
                     }
                 } else {
@@ -127,10 +140,12 @@ impl NetworkManager {
                         let len = prober.pack(dst_unit, local_ip, &mut buf);
                         buf.resize(len, 0);
                         let packet = Ipv4Packet::owned(buf).unwrap();
+                        // 使用消息队列传递数据包并最终发送数据包
                         let _ = net_send_tx.send(packet).await;
 
                         log::trace!("PROBE: {:?}", dst_unit);
 
+                        // 发送包计数
                         sent_packets.fetch_add(1, SeqCst);
                         sent_this_sec += 1;
                     }
@@ -151,7 +166,9 @@ impl NetworkManager {
         recv_packets: Arc<AtomicU64>,
         recv_tx: MpscTx<ProbeResult>,
     ) -> Result<()> {
+        // 接收ICMP数据包
         let protocol = Layer3(Icmp);
+        // 开启接收网络
         let (_, mut receiver) = transport_channel(Self::RECV_BUF_SIZE, protocol)?;
 
         #[cfg(unix)]
@@ -159,7 +176,9 @@ impl NetworkManager {
             // pnet io is synchronous, must be spawned with blocking
             log::info!("[{:?}] receiving task started", prober.phase);
 
+            // 定义超时时间
             let io_timeout = Duration::from_millis(10);
+            // 接收循环器
             let mut iter = pnet::transport::ipv4_packet_iter(&mut receiver);
 
             loop {
@@ -168,10 +187,13 @@ impl NetworkManager {
                 }
 
                 if let Ok(Some((ip_packet, _addr))) = iter.next_with_timeout(io_timeout) {
+                    // 匹配探针并对结果进行分类操作
                     match prober.parse(ip_packet.packet(), false) {
                         Ok(result) => {
                             log::debug!("[{:?}] RECV: {:?}", prober.phase, result);
+                            // 使用消息队列把接收到的数据包传给分析模块
                             let _ = recv_tx.send(result);
+                            // 计数
                             recv_packets.fetch_add(1, SeqCst);
                         }
                         Err(e @ Error::ParseError(_)) => {
