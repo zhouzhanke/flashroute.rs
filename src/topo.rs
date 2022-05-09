@@ -26,6 +26,7 @@ pub struct Topo {
 impl Topo {
     pub fn new(req_rx: MpscRx<TopoReq>) -> Self {
         let mut graph = UnGraphMap::new();
+        // 在绘图数据加入本机IP节点
         graph.add_node(OPT.local_addr);
         Self {
             req_rx,
@@ -43,8 +44,10 @@ impl Topo {
             debug: ProbeDebugResult::default(),
         };
 
+        // 绘图处理
         let process = |mut results: Vec<ProbeResult>, graph: &mut TopoGraph| {
             results.sort_by_key(|r| r.distance);
+            // 在绘图数据中处理第一个探测结果
             if let Some(first) = results.first() {
                 let dist = first.distance;
                 graph.add_node(first.responder);
@@ -52,6 +55,7 @@ impl Topo {
                     graph.add_edge(local.responder, first.responder, dist);
                 }
             }
+            // 在绘图数据中处理其他探测结果
             for (a, b) in results.iter().zip(results.iter().skip(1)) {
                 if a.responder != b.responder {
                     let dist = b.distance - a.distance;
@@ -63,6 +67,7 @@ impl Topo {
 
         while let Some(req) = self.req_rx.recv().await {
             match req {
+                // 根据目标地址整合接收的信息
                 TopoReq::Result(result) => {
                     self.results_buf
                         .entry(result.destination)
@@ -70,6 +75,7 @@ impl Topo {
                         .push(result);
                 }
                 TopoReq::Stop => {
+                    // 执行绘图处理
                     for (_, results) in self.results_buf {
                         process(results, &mut self.graph);
                     }

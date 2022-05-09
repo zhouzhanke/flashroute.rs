@@ -99,6 +99,7 @@ pub fn parse_targets(arg: &str) -> Result<Targets> {
 }
 
 pub fn get_opt() -> Opt {
+    // 读取参数
     let mut opt: Opt = Opt::from_args();
     // 获得网络
     opt.local_addr = crate::utils::get_interface_ipv4_addr(&opt.interface).unwrap();

@@ -79,14 +79,19 @@ impl Tracerouter {
 
     fn generate_targets() -> Result<DcbMap> {
         match OPT.targets.clone() {
+            // 从命令行导入目标地址
             Targets::Net(net) => {
+                // 检查扫描跨度是否超过扫描地址长度
                 if OPT.grain > (net.max_prefix_len() - net.prefix_len()) {
                     return Err(Error::BadGrainOrNet(OPT.grain, net));
                 }
 
+                // 读取随机数种子
                 let mut rng = StdRng::seed_from_u64(OPT.seed);
+                // 根据参数分割子网段
                 let subnets = net.subnets(net.max_prefix_len() - OPT.grain).unwrap();
 
+                // 随机选取子网段地址
                 let iter = subnets
                     .map(move |net| net.addr().saturating_add(rng.gen_range(0, 1 << OPT.grain)))
                     .filter(|addr| {
@@ -99,7 +104,9 @@ impl Tracerouter {
                         }
                     });
 
+                // 总扫描目标数量
                 let all_count = 1 << ((net.max_prefix_len() - net.prefix_len()) - OPT.grain);
+                // 根据iter和all_count创建hash map
                 let mut generated_targets = DcbMap::with_capacity(all_count);
                 for addr in iter {
                     generated_targets.insert(
@@ -107,6 +114,7 @@ impl Tracerouter {
                         DstCtrlBlock::new(addr, OPT.split_ttl),
                     );
                 }
+                // 输出结果
                 let filtered_count = generated_targets.len();
                 log::info!(
                     "Generated {} targets, {} removed",
@@ -117,6 +125,7 @@ impl Tracerouter {
                 Ok(generated_targets)
             }
 
+            // 从文件导入目标地址
             Targets::List(path) => {
                 let mut generated_targets = DcbMap::new();
 
@@ -282,11 +291,13 @@ impl Tracerouter {
         // 输出结果
         log::trace!("[Pre] CALLBACK: {}", result.destination);
 
-        // 决定分割跳数
+        // 更新分割跳数
         let key = Self::addr_to_key(result.destination);
         if let Some(dcb) = targets.get(&key) {
+            // 更新目标地址分割跳数
             dcb.update_split_ttl(result.distance, true);
 
+            // 更新目标地址临近的地址分割跳数
             // proximity
             let lo = 0.max(key - OPT.proximity_span as AddrKey);
             let hi = key + OPT.proximity_span as AddrKey;
@@ -340,6 +351,7 @@ impl Tracerouter {
                     }
                     // 停止信号
                     _ = &mut stop_rx => {
+                        // <绘图信息>消息队列发送方
                         let _ = cb_topo_tx.send(TopoReq::Stop);
                         break;
                     }
@@ -389,14 +401,18 @@ impl Tracerouter {
             pb.finish();
             keys = new_keys;
 
+            // 间隔时间控制
             let duration = SystemTime::now().duration_since(last_seen).unwrap();
             let min_round_duration = one_sec.min(Duration::from_millis(keys.len() as u64 * 20));
             if duration < min_round_duration {
                 tokio::time::sleep(min_round_duration - duration).await;
             }
+            // 记录时间
             last_seen = SystemTime::now();
 
+            // 计算剩余待发探针数量
             let remain_count = keys.len();
+            // 输出结果
             log::info!(
                 "round {:3}: total {:8}, complete {:8}, remain {:8};  sent {:8}, recv {:8}",
                 round,
@@ -409,11 +425,14 @@ impl Tracerouter {
         }
         // WORKER END
 
+        // 等待5秒时间接收探针
         if !self.stopped() {
             log::info!("[Main] Waiting for 5 secs...");
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
+        // 停止网络
         nm.stop();
+        // 发送停止信号
         let _ = stop_tx.send(());
 
         log::info!("Generating statistics and topology...");
@@ -429,6 +448,7 @@ impl Tracerouter {
         self.recv_responses_main
             .fetch_add(nm.recv_packets(), SeqCst);
 
+        // 返回绘图数据
         Ok(topo_task.await.unwrap().await)
     }
 

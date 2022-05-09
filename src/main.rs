@@ -74,6 +74,7 @@ async fn main() -> Result<()> {
     // 运行traceroute并把传出结果
     let topo = tr.run().await?;
     // 绘图
+    // 会调用系统命令行dot工具
     Topo::process_graph(topo).await?;
 
     // 如果是window系统就运行

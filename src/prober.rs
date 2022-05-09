@@ -119,6 +119,7 @@ impl Prober {
         let icmp_type = icmp_packet.get_icmp_type();
         let icmp_code = icmp_packet.get_icmp_code();
 
+        // 更新分割跳数=到达目标的跳数
         let (distance, from_destination) = {
             if icmp_type == IcmpTypes::DestinationUnreachable && [1, 2, 3].contains(&icmp_code.0) {
                 if initial_ttl < dst_ttl {
