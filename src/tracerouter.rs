@@ -361,7 +361,9 @@ impl Tracerouter {
         });
 
         // WORKER BEGIN
+        // 从链表中获得所有凭证
         let mut keys: Vec<_> = self.targets.keys().cloned().collect();
+        // 记录时间
         let mut last_seen = SystemTime::now();
         let one_sec = Duration::from_secs(1);
 
@@ -380,6 +382,7 @@ impl Tracerouter {
                 if self.stopped() {
                     break;
                 }
+                // 使用array中的凭证获得链表中的信息
                 let dcb = self.targets.get(&key).unwrap();
 
                 let mut ok = true;
@@ -393,7 +396,7 @@ impl Tracerouter {
                     nm.schedule_probe((dcb.addr, t)).await;
                     ok = false;
                 }
-                // 如果失败则保存信息然后重新发送
+                // 如果没有完成探测任务则加入下一轮探测
                 if !ok {
                     new_keys.push(key);
                 }

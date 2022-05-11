@@ -137,6 +137,7 @@ impl NetworkManager {
                         }
 
                         let mut buf = vec![0u8; Prober::PACK_BUFFER_LENGTH];
+                        // 生成数据包
                         let len = prober.pack(dst_unit, local_ip, &mut buf);
                         buf.resize(len, 0);
                         let packet = Ipv4Packet::owned(buf).unwrap();

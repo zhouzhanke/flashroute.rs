@@ -53,6 +53,7 @@ impl Prober {
         };
         let expect_udp_size = expect_total_size - Self::IPV4_HEADER_LENGTH;
 
+        // 生成UDP数据包部分
         let mut udp_packet =
             MutableUdpPacket::new(&mut buffer[Self::IPV4_HEADER_LENGTH as usize..]).unwrap();
         udp_packet.set_source(crate::utils::ip_checksum(dst_ip, OPT.salt));
@@ -61,6 +62,7 @@ impl Prober {
         udp_packet.set_payload(OPT.payload_message.as_bytes());
 
         let mut ip_packet = MutableIpv4Packet::new(buffer).unwrap();
+        // 编码IP ID
         let ip_id = {
             let mut id = (ttl as u16 & 0x1F) | ((self.phase as u16 & 0x1) << 5);
             if OPT.encode_timestamp {
@@ -68,6 +70,7 @@ impl Prober {
             }
             id
         };
+        // 生成IP数据包部分
         ip_packet.set_version(4);
         ip_packet.set_header_length((Self::IPV4_HEADER_LENGTH >> 2) as u8);
         ip_packet.set_destination(dst_ip);
