@@ -93,13 +93,14 @@ impl Prober {
         let icmp_packet = IcmpPacket::new(ip_packet.payload()).ok_or(Error::ParseError(2))?;
         let res_ip_packet = Ipv4Packet::new(
             &ip_packet.packet()[(Self::IPV4_HEADER_LENGTH + Self::ICMP_HEADER_LENGTH) as usize..],
-        )
+        ) 
         .ok_or(Error::ParseError(3))?;
         let res_udp_packet = UdpPacket::new(res_ip_packet.payload()).ok_or(Error::ParseError(4))?;
 
         let destination = res_ip_packet.get_destination();
         let src_port = res_udp_packet.get_source();
         let expected_src_port = crate::utils::ip_checksum(destination, OPT.salt);
+        // match probe
         if src_port != expected_src_port && !ignore_port {
             return Err(Error::UnexpectedIcmpSrcPort(src_port, expected_src_port));
         }
@@ -122,7 +123,7 @@ impl Prober {
         let icmp_type = icmp_packet.get_icmp_type();
         let icmp_code = icmp_packet.get_icmp_code();
 
-        // 更新分割跳数=到达目标的跳数
+        // 更TTL
         let (distance, from_destination) = {
             if icmp_type == IcmpTypes::DestinationUnreachable && [1, 2, 3].contains(&icmp_code.0) {
                 if initial_ttl < dst_ttl {
